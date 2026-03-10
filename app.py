@@ -2,25 +2,26 @@ import streamlit as st
 import numpy as np
 import cv2
 from PIL import Image
-import tensorflow as tf
-from tensorflow.keras.models import load_model, Model
-from tensorflow.keras.applications.resnet50 import preprocess_input
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import os
 import gdown
 
-# ── AUTO DOWNLOAD MODEL FROM GOOGLE DRIVE ────
+# ── AUTO DOWNLOAD MODEL ───────────────────────
 MODEL_PATH = "resnet_best_model.h5"
 FILE_ID    = "1qUsoq46IVL2_N54dColVdSqEr5-pWyTm"
 
 def download_model():
     if not os.path.exists(MODEL_PATH):
-        with st.spinner("⏳ Mendownload model dari Google Drive... (sekali saja)"):
-            url = f"https://drive.google.com/uc?id={FILE_ID}"
-            gdown.download(url, MODEL_PATH, quiet=False)
+        with st.spinner("Mendownload model... (sekali saja)"):
+            gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", MODEL_PATH, quiet=False)
 
 download_model()
+
+# Import keras setelah model didownload
+import keras
+from keras.models import load_model, Model
+from keras.applications.resnet50 import preprocess_input
 
 # ── PAGE CONFIG ───────────────────────────────
 st.set_page_config(
@@ -30,7 +31,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── CSS ───────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
@@ -59,41 +59,24 @@ html, body, [class*="css"] {
 </style>
 """, unsafe_allow_html=True)
 
-# ── CLASS INFO ────────────────────────────────
 CLASS_INFO = {
-    "CNV": {
-        "full_name": "Choroidal Neovascularization",
-        "desc": "Pertumbuhan pembuluh darah abnormal di bawah retina. Dapat menyebabkan kebocoran cairan dan kerusakan penglihatan permanen.",
-        "color": "#f87171", "bar": "#ef4444", "emoji": "🔴"
-    },
-    "DME": {
-        "full_name": "Diabetic Macular Edema",
-        "desc": "Pembengkakan makula akibat komplikasi diabetes. Penyebab utama gangguan penglihatan pada penderita diabetes.",
-        "color": "#fb923c", "bar": "#f97316", "emoji": "🟠"
-    },
-    "DRUSEN": {
-        "full_name": "Drusen / Early AMD",
-        "desc": "Endapan kuning kecil di bawah retina, indikator awal Age-related Macular Degeneration (AMD).",
-        "color": "#fbbf24", "bar": "#f59e0b", "emoji": "🟡"
-    },
-    "NORMAL": {
-        "full_name": "Normal Retina",
-        "desc": "Kondisi retina dalam batas normal, tidak ditemukan tanda-tanda kelainan patologis.",
-        "color": "#4ade80", "bar": "#22c55e", "emoji": "🟢"
-    },
+    "CNV":    {"full_name":"Choroidal Neovascularization","desc":"Pertumbuhan pembuluh darah abnormal di bawah retina. Dapat menyebabkan kebocoran cairan dan kerusakan penglihatan permanen.","color":"#f87171","bar":"#ef4444","emoji":"🔴"},
+    "DME":    {"full_name":"Diabetic Macular Edema","desc":"Pembengkakan makula akibat komplikasi diabetes. Penyebab utama gangguan penglihatan pada penderita diabetes.","color":"#fb923c","bar":"#f97316","emoji":"🟠"},
+    "DRUSEN": {"full_name":"Drusen / Early AMD","desc":"Endapan kuning kecil di bawah retina, indikator awal Age-related Macular Degeneration (AMD).","color":"#fbbf24","bar":"#f59e0b","emoji":"🟡"},
+    "NORMAL": {"full_name":"Normal Retina","desc":"Kondisi retina dalam batas normal, tidak ditemukan tanda-tanda kelainan patologis.","color":"#4ade80","bar":"#22c55e","emoji":"🟢"},
 }
 
-# ── HELPERS ───────────────────────────────────
 @st.cache_resource
 def load_resnet_model(path):
     try:
         return load_model(path)
-    except Exception:
+    except Exception as e:
+        st.error(f"Gagal load model: {e}")
         return None
 
 def get_last_conv_layer(model):
     for layer in reversed(model.layers):
-        if isinstance(layer, tf.keras.layers.Conv2D):
+        if isinstance(layer, keras.layers.Conv2D):
             return layer.name
     return "conv5_block3_out"
 
@@ -105,6 +88,7 @@ def preprocess_image(image):
     return np.expand_dims(img_pre, axis=0), img_224
 
 def compute_gradcam(model, img_array, pred_class_idx, last_conv_layer_name):
+    import tensorflow as tf
     grad_model = Model(
         inputs=model.inputs,
         outputs=[model.get_layer(last_conv_layer_name).output, model.output]
@@ -129,7 +113,7 @@ def overlay_gradcam(img_rgb, heatmap, alpha=0.45):
     overlay = (alpha * colormap_rgb + (1 - alpha) * img_rgb).astype(np.uint8)
     return overlay, heatmap_r
 
-# ── SIDEBAR ───────────────────────────────────
+# SIDEBAR
 with st.sidebar:
     st.markdown("### ⚙️ Konfigurasi")
     st.markdown("---")
@@ -137,51 +121,41 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🧬 Kelas Penyakit")
     for cls, info in CLASS_INFO.items():
-        st.markdown(f"""
-        <div class="sidebar-cls">
-            <b style="color:{info['color']}">{info['emoji']} {cls}</b><br>
-            <span style="color:#4a6080;font-size:0.75rem">{info['full_name']}</span>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="sidebar-cls"><b style="color:{info['color']}">{info['emoji']} {cls}</b><br><span style="color:#4a6080;font-size:0.75rem">{info['full_name']}</span></div>""", unsafe_allow_html=True)
     st.markdown("---")
-    st.markdown("<div style=\"color:#2a4060;font-size:0.7rem;font-family:monospace;text-align:center\">ResNet50 · Transfer Learning<br>Grad-CAM · OCT2017</div>", unsafe_allow_html=True)
+    st.markdown("<div style='color:#2a4060;font-size:0.7rem;font-family:monospace;text-align:center'>ResNet50 · Transfer Learning<br>Grad-CAM · OCT2017</div>", unsafe_allow_html=True)
 
-# ── HEADER ────────────────────────────────────
+# HEADER
 st.markdown("""
 <div class="main-title">🔬 <span class="title-accent">CNN</span> + Grad-CAM &nbsp;<span style="color:#4a6080;font-size:1rem">Klasifikasi Penyakit Retina</span></div>
 <div class="subtitle">// Penerapan CNN dan Grad-CAM pada Klasifikasi Penyakit Retina Berbasis Citra OCT</div>
 <span class="badge">ResNet50</span><span class="badge">Transfer Learning</span><span class="badge">Grad-CAM</span><span class="badge">OCT2017</span>
 """, unsafe_allow_html=True)
 
-# ── LOAD MODEL ────────────────────────────────
 model = load_resnet_model(MODEL_PATH)
 if model:
     n_classes = model.output_shape[-1]
     class_names = sorted(CLASS_INFO.keys())[:n_classes]
     last_conv = get_last_conv_layer(model)
-    st.success(f"✅ Model berhasil dimuat · {n_classes} kelas · Last conv: `{last_conv}`")
+    st.success(f"✅ Model berhasil dimuat · {n_classes} kelas · Last conv: {last_conv}")
 else:
     class_names = sorted(CLASS_INFO.keys())
     last_conv = "conv5_block3_out"
-    st.error("❌ Gagal memuat model. Cek koneksi internet atau link Google Drive.")
+    st.error("❌ Gagal memuat model.")
 
 st.markdown("---")
 
-# ── UPLOAD ────────────────────────────────────
 uploaded_file = st.file_uploader("📤 Upload Citra OCT (.jpg / .jpeg / .png)", type=["jpg","jpeg","png"])
 
 if uploaded_file and model:
     image = Image.open(uploaded_file)
     img_tensor, img_224 = preprocess_image(image)
-
     with st.spinner("Menganalisis citra OCT..."):
         preds = model.predict(img_tensor, verbose=0)[0]
         pred_idx = int(np.argmax(preds))
         pred_class = class_names[pred_idx]
         confidence = float(preds[pred_idx])
-        info = CLASS_INFO.get(pred_class, {
-            "full_name": pred_class, "desc": "-",
-            "color": "#38bdf8", "bar": "#38bdf8", "emoji": "🔵"
-        })
+        info = CLASS_INFO.get(pred_class, {"full_name":pred_class,"desc":"-","color":"#38bdf8","bar":"#38bdf8","emoji":"🔵"})
         heatmap = compute_gradcam(model, img_tensor, pred_idx, last_conv)
         overlay, heatmap_vis = overlay_gradcam(img_224, heatmap, alpha=gradcam_alpha)
 
@@ -203,9 +177,7 @@ if uploaded_file and model:
                 </div>
             </div>
         </div>
-        <div class="disease-info" style="border-color:{info['color']}">
-            📌 {info['desc']}
-        </div>
+        <div class="disease-info" style="border-color:{info['color']}">📌 {info['desc']}</div>
         """, unsafe_allow_html=True)
 
         st.markdown('<div class="sec-title" style="margin-top:22px">▸ Confidence Semua Kelas</div>', unsafe_allow_html=True)
@@ -216,28 +188,26 @@ if uploaded_file and model:
             border = f"1px solid {ci['color']}55" if is_top else "1px solid #0d1f35"
             bg = "#0d1f35" if is_top else "transparent"
             star = "★ " if is_top else ""
-            name_color = ci['color'] if is_top else "#7a9bbf"
-            val_color = "#e8f4fd" if is_top else "#4a6080"
+            nc = ci['color'] if is_top else "#7a9bbf"
+            vc = "#e8f4fd" if is_top else "#4a6080"
+            fw = "bold" if is_top else "normal"
             st.markdown(f"""
             <div style="background:{bg};border:{border};border-radius:8px;padding:9px 12px;margin:5px 0">
                 <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:0.75rem;margin-bottom:4px">
-                    <span style="color:{name_color}">{star}{ci['emoji']} {cls} <span style="color:#2a4060;font-size:0.68rem">— {ci['full_name']}</span></span>
-                    <span style="color:{val_color};font-weight:{'bold' if is_top else 'normal'}">{prob*100:.2f}%</span>
+                    <span style="color:{nc}">{star}{ci['emoji']} {cls} <span style="color:#2a4060;font-size:0.68rem">— {ci['full_name']}</span></span>
+                    <span style="color:{vc};font-weight:{fw}">{prob*100:.2f}%</span>
                 </div>
-                <div class="conf-bar-track">
-                    <div class="conf-bar-fill" style="width:{bar_w};background:{ci['bar']}"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+                <div class="conf-bar-track"><div class="conf-bar-fill" style="width:{bar_w};background:{ci['bar']}"></div></div>
+            </div>""", unsafe_allow_html=True)
 
     with right:
         st.markdown('<div class="sec-title">▸ Visualisasi Grad-CAM</div>', unsafe_allow_html=True)
         fig, axes = plt.subplots(1, 3, figsize=(11, 3.8))
         fig.patch.set_facecolor('#080c14')
         panels = [
-            (img_224,     "Original Image",                                    None,   '#7a9bbf'),
-            (heatmap_vis, "Grad-CAM Heatmap",                                  cm.jet, '#7a9bbf'),
-            (overlay,     f"Overlay · {pred_class} ({confidence*100:.1f}%)",  None,   info['color']),
+            (img_224,     "Original Image",                                   None,   '#7a9bbf'),
+            (heatmap_vis, "Grad-CAM Heatmap",                                 cm.jet, '#7a9bbf'),
+            (overlay,     f"Overlay · {pred_class} ({confidence*100:.1f}%)", None,   info['color']),
         ]
         for ax, (img_data, title, cmap, tc) in zip(axes, panels):
             ax.set_facecolor('#080c14')
@@ -248,40 +218,27 @@ if uploaded_file and model:
         st.pyplot(fig, use_container_width=True)
         plt.close(fig)
 
-        st.markdown("""
-        <div style="display:flex;gap:10px;margin-top:6px;font-size:0.71rem;font-family:monospace;color:#4a6080;flex-wrap:wrap">
+        st.markdown("""<div style="display:flex;gap:10px;margin-top:6px;font-size:0.71rem;font-family:monospace;color:#4a6080;flex-wrap:wrap">
             <span><span style="background:#0000ff;width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:3px;vertical-align:middle"></span>Rendah</span>
-            <span><span style="background:#00ffff;width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:3px;vertical-align:middle"></span>Sedang</span>
             <span><span style="background:#00ff00;width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:3px;vertical-align:middle"></span>Menengah</span>
             <span><span style="background:#ffff00;width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:3px;vertical-align:middle"></span>Tinggi</span>
             <span><span style="background:#ff0000;width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:3px;vertical-align:middle"></span>Area Fokus Model</span>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
-        st.markdown(f"""
-        <div class="interp-box">
+        st.markdown(f"""<div class="interp-box">
             <b style="color:#38bdf8;font-family:'IBM Plex Mono',monospace">📡 Interpretasi Grad-CAM</b><br><br>
-            Area <b style="color:#ef4444">merah–kuning</b> menunjukkan region citra OCT yang paling
-            berpengaruh terhadap prediksi kelas <b style="color:{info['color']}">{pred_class}</b>.
+            Area <b style="color:#ef4444">merah–kuning</b> menunjukkan region citra OCT yang paling berpengaruh terhadap prediksi kelas <b style="color:{info['color']}">{pred_class}</b>.
             Area <b style="color:#60a5fa">biru</b> memiliki kontribusi rendah.<br><br>
             <span style="color:#2a4060">Membantu validasi apakah model fokus pada area anatomis yang relevan secara klinis.</span>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
 elif uploaded_file and not model:
     st.error("❌ Model gagal dimuat.")
 else:
-    st.markdown("""
-    <div style="border:1px dashed #1e3a5f;border-radius:12px;padding:60px 40px;text-align:center;color:#2a4060;font-family:monospace;font-size:0.85rem;line-height:2;margin-top:10px">
+    st.markdown("""<div style="border:1px dashed #1e3a5f;border-radius:12px;padding:60px 40px;text-align:center;color:#2a4060;font-family:monospace;font-size:0.85rem;line-height:2;margin-top:10px">
         🔬 Upload citra OCT untuk memulai analisis<br>
         <span style="font-size:0.75rem">Prediksi kelas · Confidence score · Grad-CAM visualization</span>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
 
 st.markdown("---")
-st.markdown("""
-<div style="text-align:center;color:#1e3a5f;font-size:0.7rem;font-family:monospace;line-height:2">
-    PENERAPAN CNN DAN GRAD-CAM PADA KLASIFIKASI PENYAKIT RETINA BERBASIS CITRA OCT<br>
-    ResNet50 · Transfer Learning · Grad-CAM · OCT2017 Dataset
-</div>
-""", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:#1e3a5f;font-size:0.7rem;font-family:monospace;line-height:2'>PENERAPAN CNN DAN GRAD-CAM PADA KLASIFIKASI PENYAKIT RETINA BERBASIS CITRA OCT<br>ResNet50 · Transfer Learning · Grad-CAM · OCT2017 Dataset</div>", unsafe_allow_html=True)
