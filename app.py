@@ -5,23 +5,24 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import os
-import gdown
-import torch
-import torch.nn as nn
-import torchvision.models as models
-import torchvision.transforms as transforms
-import h5py
 
 # ── AUTO DOWNLOAD MODEL ───────────────────────
 MODEL_PATH = "resnet_best_model.h5"
-FILE_ID    = "1qUsoq46IVL2_N54dColVdSqEr5-pWyTm"
+HF_URL     = "https://huggingface.co/yyusuf/oct-resnet50/resolve/main/resnet_best_model.h5"
 
 def download_model():
     if not os.path.exists(MODEL_PATH):
-        with st.spinner("⏳ Mendownload model... (sekali saja, harap tunggu)"):
-            gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", MODEL_PATH, quiet=False)
+        with st.spinner("⏳ Mendownload model dari Hugging Face... (sekali saja, ~167MB)"):
+            import urllib.request
+            urllib.request.urlretrieve(HF_URL, MODEL_PATH)
 
 download_model()
+
+# ── IMPORT KERAS ──────────────────────────────
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+from tensorflow.keras.applications.resnet50 import preprocess_input
 
 # ── PAGE CONFIG ───────────────────────────────
 st.set_page_config(
@@ -62,101 +63,48 @@ CLASS_INFO = {
     "DME":    {"full_name":"Diabetic Macular Edema","desc":"Pembengkakan makula akibat komplikasi diabetes. Penyebab utama gangguan penglihatan pada penderita diabetes.","color":"#fb923c","bar":"#f97316","emoji":"🟠"},
     "DR":     {"full_name":"Diabetic Retinopathy","desc":"Kerusakan retina akibat diabetes jangka panjang. Dapat menyebabkan kebutaan jika tidak ditangani.","color":"#f472b6","bar":"#ec4899","emoji":"🩷"},
     "DRUSEN": {"full_name":"Drusen / Early AMD","desc":"Endapan kuning kecil di bawah retina, indikator awal Age-related Macular Degeneration.","color":"#fbbf24","bar":"#f59e0b","emoji":"🟡"},
-    "MH":     {"full_name":"Macular Hole","desc":"Lubang kecil pada makula retina. Menyebabkan gangguan penglihatan sentral dan distorsi gambar.","color":"#f97316","bar":"#ea580c","emoji":"🟤"},
+    "MH":     {"full_name":"Macular Hole","desc":"Lubang kecil pada makula retina. Menyebabkan gangguan penglihatan sentral dan distorsi gambar.","color":"#fb923c","bar":"#ea580c","emoji":"🟤"},
     "NORMAL": {"full_name":"Normal Retina","desc":"Kondisi retina dalam batas normal, tidak ditemukan tanda-tanda kelainan patologis.","color":"#4ade80","bar":"#22c55e","emoji":"🟢"},
 }
 
-# ── LOAD MODEL (H5 -> PyTorch ResNet50) ──────
 @st.cache_resource
-def load_model_from_h5(path):
+def load_keras_model(path):
     try:
-        # Build ResNet50 dengan jumlah kelas dari H5
-        with h5py.File(path, "r") as f:
-            # Cari output layer untuk tahu jumlah kelas
-            n_classes = 4  # default
-            try:
-                # Coba baca config dari H5
-                import json
-                config = f.attrs.get("model_config", None)
-                if config:
-                    cfg = json.loads(config)
-                    layers = cfg.get("config", {}).get("layers", [])
-                    for l in reversed(layers):
-                        units = l.get("config", {}).get("units", None)
-                        if units:
-                            n_classes = units
-                            break
-            except Exception:
-                pass
-
-        # Build ResNet50 PyTorch
-        model = models.resnet50(weights=None)
-        model.fc = nn.Linear(model.fc.in_features, n_classes)
-
-        # Load weights dari H5 ke PyTorch
-        with h5py.File(path, "r") as f:
-            def load_keras_weights(model, h5file):
-                # Map Keras ResNet50 layer names to PyTorch
-                # Copy conv weights layer by layer
-                try:
-                    # Load hanya FC layer jika arsitektur berbeda
-                    # Coba load weights dengan pendekatan sederhana
-                    layer_names = list(h5file.keys())
-                    return False
-                except Exception:
-                    return False
-            load_keras_weights(model, f)
-
-        # Fallback: gunakan pretrained ImageNet weights
-        # (prediksi tetap bisa jalan, hanya fine-tuned weights tidak ter-load)
-        pretrained = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-        pretrained.fc = nn.Linear(pretrained.fc.in_features, n_classes)
-        pretrained.eval()
-        return pretrained, n_classes
-
+        model = load_model(path, compile=False)
+        return model
     except Exception as e:
         st.error(f"Gagal load model: {e}")
-        return None, 4
+        return None
 
-# Grad-CAM hook
-class GradCAM:
-    def __init__(self, model, target_layer):
-        self.model = model
-        self.gradients = None
-        self.activations = None
-        target_layer.register_forward_hook(self._save_activation)
-        target_layer.register_full_backward_hook(self._save_gradient)
-
-    def _save_activation(self, module, input, output):
-        self.activations = output.detach()
-
-    def _save_gradient(self, module, grad_input, grad_output):
-        self.gradients = grad_output[0].detach()
-
-    def generate(self, input_tensor, class_idx):
-        self.model.zero_grad()
-        output = self.model(input_tensor)
-        output[0, class_idx].backward()
-        pooled_grads = self.gradients.mean(dim=[0, 2, 3])
-        activations = self.activations[0]
-        for i in range(activations.shape[0]):
-            activations[i] *= pooled_grads[i]
-        heatmap = activations.mean(dim=0).cpu().numpy()
-        heatmap = np.maximum(heatmap, 0)
-        if heatmap.max() > 0:
-            heatmap /= heatmap.max()
-        return heatmap
+def get_last_conv_layer(model):
+    for layer in reversed(model.layers):
+        if isinstance(layer, tf.keras.layers.Conv2D):
+            return layer.name
+    return "conv5_block3_out"
 
 def preprocess_image(image):
     img = image.convert("RGB")
     img_np = np.array(img)
     img_224 = cv2.resize(img_np, (224, 224))
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    tensor = transform(Image.fromarray(img_224)).unsqueeze(0)
-    return tensor, img_224
+    img_pre = preprocess_input(img_224.astype(np.float32))
+    return np.expand_dims(img_pre, axis=0), img_224
+
+def compute_gradcam(model, img_array, pred_class_idx, last_conv_name):
+    from tensorflow.keras.models import Model as KModel
+    grad_model = KModel(
+        inputs=model.inputs,
+        outputs=[model.get_layer(last_conv_name).output, model.output]
+    )
+    with tf.GradientTape() as tape:
+        conv_outputs, predictions = grad_model(img_array)
+        loss = predictions[:, pred_class_idx]
+    grads = tape.gradient(loss, conv_outputs)
+    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+    conv_out = conv_outputs[0]
+    heatmap = conv_out @ pooled_grads[..., tf.newaxis]
+    heatmap = tf.squeeze(heatmap)
+    heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-8)
+    return heatmap.numpy()
 
 def overlay_gradcam(img_rgb, heatmap, alpha=0.45):
     h, w = img_rgb.shape[:2]
@@ -186,14 +134,15 @@ st.markdown("""
 <span class="badge">ResNet50</span><span class="badge">Transfer Learning</span><span class="badge">Grad-CAM</span><span class="badge">OCT2017</span>
 """, unsafe_allow_html=True)
 
-model, n_classes = load_model_from_h5(MODEL_PATH)
-class_names = sorted(CLASS_INFO.keys())
-
+model = load_keras_model(MODEL_PATH)
 if model:
-    gradcam = GradCAM(model, model.layer4[-1])
+    n_classes = model.output_shape[-1]
+    class_names = sorted(CLASS_INFO.keys())[:n_classes]
+    last_conv = get_last_conv_layer(model)
     st.success(f"✅ Model dimuat · {n_classes} kelas: {', '.join(class_names)}")
 else:
-    st.error("❌ Gagal memuat model.")
+    class_names = sorted(CLASS_INFO.keys())
+    last_conv = "conv5_block3_out"
 
 st.markdown("---")
 
@@ -204,18 +153,12 @@ if uploaded_file and model:
     img_tensor, img_224 = preprocess_image(image)
 
     with st.spinner("Menganalisis citra OCT..."):
-        with torch.no_grad():
-            output = model(img_tensor)
-            probs = torch.softmax(output, dim=1)[0].numpy()
-
-        pred_idx = int(np.argmax(probs))
+        preds = model.predict(img_tensor, verbose=0)[0]
+        pred_idx = int(np.argmax(preds))
         pred_class = class_names[pred_idx]
-        confidence = float(probs[pred_idx])
+        confidence = float(preds[pred_idx])
         info = CLASS_INFO.get(pred_class, {"full_name":pred_class,"desc":"-","color":"#38bdf8","bar":"#38bdf8","emoji":"🔵"})
-
-        # Grad-CAM
-        img_tensor_grad = img_tensor.requires_grad_(True)
-        heatmap = gradcam.generate(img_tensor_grad, pred_idx)
+        heatmap = compute_gradcam(model, img_tensor, pred_idx, last_conv)
         overlay, heatmap_vis = overlay_gradcam(img_224, heatmap, alpha=gradcam_alpha)
 
     left, right = st.columns([1.05, 1], gap="large")
@@ -240,7 +183,7 @@ if uploaded_file and model:
         """, unsafe_allow_html=True)
 
         st.markdown('<div class="sec-title" style="margin-top:22px">▸ Confidence Semua Kelas</div>', unsafe_allow_html=True)
-        for i, (cls, prob) in enumerate(zip(class_names, probs)):
+        for i, (cls, prob) in enumerate(zip(class_names, preds)):
             ci = CLASS_INFO.get(cls, {"bar":"#38bdf8","color":"#38bdf8","emoji":"·","full_name":cls})
             is_top = (i == pred_idx)
             bar_w = f"{prob*100:.1f}%"
