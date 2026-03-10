@@ -56,9 +56,13 @@ html, body, [class*="css"] { font-family:'IBM Plex Sans',sans-serif; background-
 """, unsafe_allow_html=True)
 
 CLASS_INFO = {
+    "AMD":    {"full_name":"Age-related Macular Degeneration","desc":"Degenerasi makula terkait usia. Penyebab utama kehilangan penglihatan pada orang tua.","color":"#c084fc","bar":"#a855f7","emoji":"🟣"},
     "CNV":    {"full_name":"Choroidal Neovascularization","desc":"Pertumbuhan pembuluh darah abnormal di bawah retina. Dapat menyebabkan kebocoran cairan dan kerusakan penglihatan permanen.","color":"#f87171","bar":"#ef4444","emoji":"🔴"},
+    "CSR":    {"full_name":"Central Serous Retinopathy","desc":"Penumpukan cairan di bawah retina bagian tengah. Menyebabkan gangguan penglihatan sementara.","color":"#67e8f9","bar":"#06b6d4","emoji":"🔵"},
     "DME":    {"full_name":"Diabetic Macular Edema","desc":"Pembengkakan makula akibat komplikasi diabetes. Penyebab utama gangguan penglihatan pada penderita diabetes.","color":"#fb923c","bar":"#f97316","emoji":"🟠"},
-    "DRUSEN": {"full_name":"Drusen / Early AMD","desc":"Endapan kuning kecil di bawah retina, indikator awal Age-related Macular Degeneration (AMD).","color":"#fbbf24","bar":"#f59e0b","emoji":"🟡"},
+    "DR":     {"full_name":"Diabetic Retinopathy","desc":"Kerusakan retina akibat diabetes jangka panjang. Dapat menyebabkan kebutaan jika tidak ditangani.","color":"#f472b6","bar":"#ec4899","emoji":"🩷"},
+    "DRUSEN": {"full_name":"Drusen / Early AMD","desc":"Endapan kuning kecil di bawah retina, indikator awal Age-related Macular Degeneration.","color":"#fbbf24","bar":"#f59e0b","emoji":"🟡"},
+    "MH":     {"full_name":"Macular Hole","desc":"Lubang kecil pada makula retina. Menyebabkan gangguan penglihatan sentral dan distorsi gambar.","color":"#f97316","bar":"#ea580c","emoji":"🟤"},
     "NORMAL": {"full_name":"Normal Retina","desc":"Kondisi retina dalam batas normal, tidak ditemukan tanda-tanda kelainan patologis.","color":"#4ade80","bar":"#22c55e","emoji":"🟢"},
 }
 
@@ -183,7 +187,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 model, n_classes = load_model_from_h5(MODEL_PATH)
-class_names = sorted(CLASS_INFO.keys())[:n_classes]
+class_names = sorted(CLASS_INFO.keys())
 
 if model:
     gradcam = GradCAM(model, model.layer4[-1])
